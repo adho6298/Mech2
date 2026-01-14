@@ -1,0 +1,6 @@
+pip install opencv-python==4.10.0.84
+pip install mediapipe==0.10.21 
+Mediapipe installs an older version of numpy and that doesn't work with new version of opencv, so you need the older opencv as well. 
+
+
+https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/python#live-stream
