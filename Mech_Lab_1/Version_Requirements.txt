@@ -11,3 +11,10 @@ source .venv/bin/activate
 # Install old versions of all the libraries needed 
 pip install opencv-python==4.10.0.84
 pip install mediapipe==0.10.21 
+
+
+# For GestureRecognitionModel.py
+pip install torch
+pip install pandas
+pip install scikit-learn
+pip install matplotlib
