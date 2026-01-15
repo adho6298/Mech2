@@ -31,11 +31,11 @@ while True:
             # Write to file if recording
             if is_recording:
                 with open(output_file, 'a') as f:
-                    f.write(' '.join([f'{val:.4f}' for val in row]) + '\n')
+                    f.write(' '.join([f'{val}' for val in row]) + '\n')
                 frame_count += 1
                 print(f'Recording frame {frame_count}')
             else:
-                print(' '.join([f'{val:.4f}' for val in row]))
+                print(' '.join([f'{val}' for val in row]))
             
             mpDraw.draw_landmarks(img, handLms, mpHands.HAND_CONNECTIONS)
     
