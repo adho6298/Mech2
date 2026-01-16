@@ -4,6 +4,10 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 cap = cv2.VideoCapture(0)
 
@@ -32,7 +36,7 @@ class Model(nn.Module):
 
 # Load the trained model
 model = Model()
-model.load_state_dict(torch.load('Mech_Lab_1/gesture_model.pth'))
+model.load_state_dict(torch.load(os.path.join(SCRIPT_DIR, 'gesture_model.pth')))
 model.eval()  # Set to evaluation mode
 
 # Class names for display (update these to match your actual gestures)
@@ -77,3 +81,5 @@ while True:
 
     cv2.imshow("Image", img)
     cv2.waitKey(1)
+
+    
