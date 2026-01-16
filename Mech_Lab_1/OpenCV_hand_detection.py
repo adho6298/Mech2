@@ -1,8 +1,27 @@
 import cv2
 import numpy as np
-import math 
+import math
+import RPi.GPIO as GPIO
+import time 
 
-cap = cv2.VideoCapture(0)
+
+#open using open cv
+cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+
+#GPIO numbering command
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(2,GPIO.OUT)
+GPIO.setup(3,GPIO.OUT)
+GPIO.setup(4,GPIO.OUT)
+GPIO.setup(17,GPIO.OUT)
+GPIO.setup(27,GPIO.OUT)
+
+#open using Picamera
+#cap = Picamera2()
+#config = cap.create_video_configuration(main={"size": (640,480),"format":"BGR888"})
+#cap.configure(config)
+#cap.start()
+
 
 #check is camera opened successfully
 if not cap.isOpened():
@@ -17,6 +36,12 @@ x1, y1 = 300, 300   # bottom-right corner
 while True:
     
     ret, frame = cap.read()
+    
+    if not ret or frame is None:
+        print("Didnt grab the frame")
+        break
+        
+        
     cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 255, 0), 2)   #dont hard code boundaries
     crop_frame = frame[y0:y1, x0:x1]
     
@@ -94,23 +119,66 @@ while True:
     if count_defects == 1:
         cv2.putText(frame, "2 fingers", (50,50), cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 2 , 2)
         val = 2
+        GPIO.output(3,GPIO.HIGH)
+        
+        GPIO.output(2,GPIO.LOW)
+        GPIO.output(4,GPIO.LOW)
+        GPIO.output(17,GPIO.LOW)
+        GPIO.output(27,GPIO.LOW)
+        
+        
+        
     elif count_defects == 2:
         cv2.putText(frame, "3 fingers", (50,50), cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 2 , 2)
         #print("3")
         val = 3
+        GPIO.output(4,GPIO.HIGH)
+        
+        GPIO.output(3,GPIO.LOW)
+        GPIO.output(2,GPIO.LOW)
+        GPIO.output(17,GPIO.LOW)
+        GPIO.output(27,GPIO.LOW)
+        
     elif count_defects == 3:
         cv2.putText(frame, "4 fingers", (50,50), cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 2 , 2)
         #print("4")
         val = 4
+        
+        GPIO.output(17,GPIO.HIGH)
+        
+        GPIO.output(3,GPIO.LOW)
+        GPIO.output(4,GPIO.LOW)
+        GPIO.output(2,GPIO.LOW)
+        GPIO.output(27,GPIO.LOW)
+        
     elif count_defects == 4:
         cv2.putText(frame, "5 fingers", (50,50), cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 2 , 2)
         #print("5")
         val = 5
+        
+        GPIO.output(27,GPIO.HIGH)
+        
+        GPIO.output(3,GPIO.LOW)
+        GPIO.output(4,GPIO.LOW)
+        GPIO.output(17,GPIO.LOW)
+        GPIO.output(2,GPIO.LOW)
+        
+
 
     else:
         cv2.putText(frame, "This is 1 finger", (50,50), cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 2 , 2)
         #print("1")
         val = 1
+        
+        GPIO.output(2,GPIO.HIGH)
+        
+        GPIO.output(3,GPIO.LOW)
+        GPIO.output(4,GPIO.LOW)
+        GPIO.output(17,GPIO.LOW)
+        GPIO.output(27,GPIO.LOW)
+        
+    
+    
     
     cv2.imshow('Gesture', frame)
     all_img = np.hstack((drawing,crop_frame))
