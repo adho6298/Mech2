@@ -15,7 +15,7 @@ class Model(nn.Module):
   # H2 (n) --> 64
   # H3 (n) --> 32
   # Output layer --> 6 classes
-  def __init__(self, in_features=63, h1=128, h2=64, h3=32, out_features=7, dropout=0.2):
+  def __init__(self, in_features=63, h1=128, h2=64, h3=32, out_features=8, dropout=0.2):
     super().__init__() # instantiate our nn.Module, initializing the parent class
     self.fc1 = nn.Linear(in_features, h1) # Define the first fully connected (linear) layer: input -> h1
     #self.bn1 = nn.BatchNorm1d(h1) # Add batch normalization after fc1
@@ -113,7 +113,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.01) # Initialize optimizer
 
 # Train our model!
 # Epochs? (one run thru all the training data in our network)
-epochs = 1000 # Define number of training iterations
+epochs = 1800  # Define number of training iterations
 losses = [] # List to store loss values for plotting later
 for i in range(epochs): # Loop through the number of epochs
   # Go forward and get a prediction
