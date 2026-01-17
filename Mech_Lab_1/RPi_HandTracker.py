@@ -69,7 +69,7 @@ def set_leds(prediction):
         led3.blink(on_time=0.2, off_time=0.2)
 
 # Initialize camera with optimized settings for Pi
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 if not cap.isOpened():
     print("ERROR: Could not open camera!")
     print("Check that the camera is connected and not in use by another application.")
