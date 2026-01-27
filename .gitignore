@@ -1,3 +1,5 @@
-.venv/
-venv/
-dataset/
+Mech_Lab_2/.venv
+Mech_Lab_2/venv
+Mech_Lab_2/Facial_Recognition/dataset
+Mech_Lab_3/venv
+Mech_Lab_3/.venv
