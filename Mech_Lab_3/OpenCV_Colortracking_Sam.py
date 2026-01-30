@@ -1,8 +1,12 @@
 import cv2
 import numpy as np
 import time 
+import serial
 
 cap = cv2.VideoCapture(0)
+
+ser = serial.Serial('/dev/ttyACM0',9600)
+baud_rate = 9600
 
 if not cap.isOpened():                      #error loop
     print("Error: Could not open camera.")
@@ -122,8 +126,10 @@ while True:
         u = Kp*e + Kd*de +Ki*ie
 
         print(u)
-
-        
+        u += 290
+        byte = int( u / 2.27)  #get info to one byte (loss of information)
+        byte = byte.to_bytes(1, byteorder='big', signed=False)
+        ser.write(byte)
 
     cv2.imshow("Ball Locator", frame)
 
