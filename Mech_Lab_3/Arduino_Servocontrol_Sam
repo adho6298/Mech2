@@ -1,0 +1,32 @@
+#include <Servo.h>
+Servo myServo;
+int pin2 = 2;
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(9600);
+  myServo.attach(9);
+  pinMode(pin2,OUTPUT);
+
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  //for (int i = 0 ; i <= 500, i++) {
+    if (Serial.available()> 0) {
+      int command = Serial.read();
+      Serial.println(command);
+
+    //--------------------Test Code----------------
+
+    //if (command == 127) {
+      //digitalWrite(pin2,HIGH);
+      //delay(1000);
+    //}
+    //else {
+    //  digitalWrite(pin2,LOW);
+    //}
+      int pos = (command / 3.64) + 55;  // range of 70 degrees from 55 - 125, 1st attempt to balance with a servo motor
+      myServo.write(pos);
+  }
+}
