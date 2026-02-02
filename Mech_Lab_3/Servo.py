@@ -4,8 +4,8 @@ import time
 # Set up GPIO mode
 GPIO.setmode(GPIO.BCM)
 
-# Define the GPIO pin (GPIO 17, physical pin 11)
-SERVO_PIN = 17
+# Define the GPIO pin (GPIO 18, physical pin 12) - Hardware PWM for clean signal
+SERVO_PIN = 18
 
 # Set up the servo pin as output
 GPIO.setup(SERVO_PIN, GPIO.OUT)
@@ -33,39 +33,39 @@ try:
     print("Press Ctrl+C to stop")
     
     while True:
-        # Sweep from 0 to 180 degrees
-        print("Moving to 0°")
-        set_angle(0)
-        time.sleep(1)
+        # # Sweep from 0 to 180 degrees
+        # print("Moving to 0°")
+        # set_angle(0)
+        # time.sleep(1)
         
-        print("Moving to 45°")
-        set_angle(45)
-        time.sleep(1)
+        # print("Moving to 45°")
+        # set_angle(45)
+        # time.sleep(1)
         
-        print("Moving to 90°")
         set_angle(90)
+        print("Moved to 90°")
         time.sleep(1)
         
-        print("Moving to 135°")
-        set_angle(135)
-        time.sleep(1)
+        # print("Moving to 135°")
+        # set_angle(135)
+        # time.sleep(1)
         
-        print("Moving to 180°")
-        set_angle(180)
-        time.sleep(1)
+        # print("Moving to 180°")
+        # set_angle(180)
+        # time.sleep(1)
         
-        # Sweep back from 180 to 0 degrees
-        print("Moving to 135°")
-        set_angle(135)
-        time.sleep(1)
+        # # Sweep back from 180 to 0 degrees
+        # print("Moving to 135°")
+        # set_angle(135)
+        # time.sleep(1)
         
-        print("Moving to 90°")
-        set_angle(90)
-        time.sleep(1)
+        # print("Moving to 90°")
+        # set_angle(90)
+        # time.sleep(1)
         
-        print("Moving to 45°")
-        set_angle(45)
-        time.sleep(1)
+        # print("Moving to 45°")
+        # set_angle(45)
+        # time.sleep(1)
 
 except KeyboardInterrupt:
     print("\nStopping servo...")
