@@ -6,6 +6,14 @@ Mech_Lab_2/Facial_Recognition/dataset
 Mech_Lab_3/venv
 Mech_Lab_3/.venv
 .venv
+<<<<<<< Updated upstream
 venv
 .vscode
+=======
+.vscode
+.git
+.gitattributes
+Mech_Lab_2
+Mech_Lab_1
+>>>>>>> Stashed changes
 .gitignore
