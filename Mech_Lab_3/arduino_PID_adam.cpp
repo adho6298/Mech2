@@ -4,9 +4,9 @@
 /*SERVO POSITION CONSTANTS*/
 /* These are used to set the position of the servo using "microseconds of the pulse width"
 instead of degrees for finer control*/
-#define SERVO_OFFSET 1425   //center position
-#define SERVO_MIN 1325
-#define SERVO_MAX 1525
+#define SERVO_OFFSET 1600   //center position
+#define SERVO_MIN 700
+#define SERVO_MAX 2400
   
 /*REFERENCE RANGE*/
 #define REFERENCE_MIN 0
@@ -16,12 +16,12 @@ instead of degrees for finer control*/
 #define DT 0.0055  //seconds
   
 /*PID PARAMETERS*/
-#define Kp 0.01    //proportional coefficient
-#define Ki 0.5    //integral coefficient
-#define Kd 0.5    //derivative coefficient
+#define Kp 0.3    //proportional coefficient
+#define Ki 0.01    //integral coefficient
+#define Kd 0.05    //derivative coefficient
   
 /*UPSCALING TO Servo.writeMilliseconds*/
-#define OUTPUT_UPSCALE_FACTOR 10
+#define OUTPUT_UPSCALE_FACTOR 1
   
 /*EMA ALPHAS*/
 #define SENSOR_EMA_a 0.05
@@ -130,8 +130,8 @@ void loop() {
     output = (Kp*error + Ki*integral + Kd*derivative)*OUTPUT_UPSCALE_FACTOR;
     previous_error = error;
     
-    // Calculate servo output with saturation
-    servo_output = round(output) + SERVO_OFFSET;
+    // Calculate servo output with saturation (negated for inverted servo direction)
+    servo_output = round(-output) + SERVO_OFFSET;
       
     if(servo_output < SERVO_MIN){ //saturate servo output at min/max range 
       servo_output = SERVO_MIN; 
