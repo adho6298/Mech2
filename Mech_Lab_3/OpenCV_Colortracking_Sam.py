@@ -43,8 +43,8 @@ while True:
 
     # HUE (0-179 color), Saturation (0-255 Saturation color strength), Value (0-255 brightness)
     #Hue Range: Red = 0-10 and 170-180. Orange 10-25. Yellow 35-85. Blue 100-130. Purple 130-160.
-    lower_blue = np.array([100, 150, 50])
-    upper_blue = np.array([140, 255, 255])
+    lower_blue = np.array([0, 0, 200])
+    upper_blue = np.array([179, 40, 255])
 
 
     # Note: For colors that wrap around the hue spectrum (like red),
