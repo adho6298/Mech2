@@ -5,8 +5,8 @@
 /* These are used to set the position of the servo using "microseconds of the pulse width"
 instead of degrees for finer control*/
 #define SERVO_OFFSET 1425   //center position
-#define SERVO_MIN 1000
-#define SERVO_MAX 1900
+#define SERVO_MIN 1325
+#define SERVO_MAX 1525
   
 /*REFERENCE RANGE*/
 #define REFERENCE_MIN 0
@@ -16,9 +16,9 @@ instead of degrees for finer control*/
 #define DT 0.0055  //seconds
   
 /*PID PARAMETERS*/
-#define Kp 0.7    //proportional coefficient
-#define Ki 0.2    //integral coefficient
-#define Kd 0.2    //derivative coefficient
+#define Kp 0.01    //proportional coefficient
+#define Ki 0.5    //integral coefficient
+#define Kd 0.5    //derivative coefficient
   
 /*UPSCALING TO Servo.writeMilliseconds*/
 #define OUTPUT_UPSCALE_FACTOR 10
@@ -29,8 +29,8 @@ instead of degrees for finer control*/
   
 /*SENSOR SPIKE NOISE HANDLING*/
 /*Adjust these values to filter camera noise better*/
-#define SENSOR_NOISE_SPIKE_THRESHOLD 100
-#define SENSOR_NOISE_LP_THRESHOLD 300
+#define SENSOR_NOISE_SPIKE_THRESHOLD 350
+#define SENSOR_NOISE_LP_THRESHOLD 500
   
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
   
@@ -72,14 +72,20 @@ void loop() {
     
   /*MAP POT POSITION TO CM SETPOINT RANGE*/
   float setpoint = mapfloat((float)pot_filtered, 0.0, 1024.0, REFERENCE_MIN, REFERENCE_MAX);
-  float setpoint = 320;
+  setpoint = 320;
   
   /*READ SENSOR DATA*/
   int sensor_value = last_sensor_value;  //default to last sensor value if no new data is available
+  bool ball_detected = true;  // Track if ball is detected
+  
   if (Serial.available() > 0){
     int temp = Serial.parseInt(); // Much faster and non-blocking with setTimeout(1)
-    if(temp >= 0 && temp <= 640) { // Validate range before using
+    if(temp == -1) { // No ball detected signal
+      ball_detected = false;
+    }
+    else if(temp >= 0 && temp <= 640) { // Validate range before using
       sensor_value = temp;
+      ball_detected = true;
     }
     // Clear any remaining bytes in buffer (including newline)
     while(Serial.available() > 0) {
@@ -87,57 +93,54 @@ void loop() {
     }
   }
   
-  /*REMOVE SENSOR NOISE SPIKES*/
-  if(abs(sensor_value-old_sensor_value) < SENSOR_NOISE_LP_THRESHOLD && abs(sensor_value-last_sensor_value) < SENSOR_NOISE_SPIKE_THRESHOLD){  //everything is in order
-    old_sensor_value = last_sensor_value;
-    last_sensor_value = sensor_value;
-  }
-  else{                               //spike detected - set sample equal to last
-    sensor_value = last_sensor_value;
-  
-  }
-    
-   /*RUN SENSOR EMA*/
-  sensor_filtered = (SENSOR_EMA_a*sensor_value) + ((1-SENSOR_EMA_a)*sensor_filtered);
-  
-  /*PID CONTROLLER*/
-  float error = setpoint - sensor_filtered;
-
-  integral = integral + error*DT;
-
-  float derivative = (error - previous_error)/DT;
-  float output = (Kp*error + Ki*integral + Kd*derivative)*OUTPUT_UPSCALE_FACTOR;
-  previous_error = error;
-  
-  // /*PRINT TO SERIAL THE TERM CONTRIBUTIONS*/
-  // Serial.print("P: ");
-  // Serial.print(Kp*error);
-  // Serial.print('\t');
-  // Serial.print("I: ");
-  // Serial.print(Ki*integral);
-  // Serial.print('\t');
-  // Serial.print("D: ");
-  // Serial.print(Kd*derivative);
-  // Serial.print('\t');
-  
-  // /*PRINT TO SERIAL FILTERED VS UNFILTERED SENSOR DATA*/
-  // Serial.print("Filtered sensor: ");
-  // Serial.print(sensor_filtered);
-  // Serial.print('\t');
-  // Serial.print("Unfiltered sensor: ");
-  // Serial.println(sensor_value);
-  // Serial.print('\t');
-  
   /*PREPARE AND WRITE SERVO OUTPUT*/
-  int servo_output = round(output) + SERVO_OFFSET;
-    
-  if(servo_output < SERVO_MIN){ //saturate servo output at min/max range 
-    servo_output = SERVO_MIN; 
-  } 
-  else if(servo_output > SERVO_MAX){
-    servo_output = SERVO_MAX;
+  int servo_output;
+  float error = 0;
+  float output = 0;
+  
+  if(!ball_detected) {
+    // No ball detected - reset to level center position immediately
+    servo_output = SERVO_OFFSET;
+    // Reset all filters and PID variables to center/zero
+    sensor_filtered = 320;
+    last_sensor_value = 320;
+    old_sensor_value = 320;
+    integral = 0;
+    previous_error = 0;
   }
+  else {
+    // Ball detected - run full processing
     
+    /*REMOVE SENSOR NOISE SPIKES*/
+    if(abs(sensor_value-old_sensor_value) < SENSOR_NOISE_LP_THRESHOLD && abs(sensor_value-last_sensor_value) < SENSOR_NOISE_SPIKE_THRESHOLD){  //everything is in order
+      old_sensor_value = last_sensor_value;
+      last_sensor_value = sensor_value;
+    }
+    else{                               //spike detected - set sample equal to last
+      sensor_value = last_sensor_value;
+    }
+      
+    /*RUN SENSOR EMA*/
+    sensor_filtered = (SENSOR_EMA_a*sensor_value) + ((1-SENSOR_EMA_a)*sensor_filtered);
+    
+    /*PID CONTROLLER*/
+    error = setpoint - sensor_filtered;
+    integral = integral + error*DT;
+    float derivative = (error - previous_error)/DT;
+    output = (Kp*error + Ki*integral + Kd*derivative)*OUTPUT_UPSCALE_FACTOR;
+    previous_error = error;
+    
+    // Calculate servo output with saturation
+    servo_output = round(output) + SERVO_OFFSET;
+      
+    if(servo_output < SERVO_MIN){ //saturate servo output at min/max range 
+      servo_output = SERVO_MIN; 
+    } 
+    else if(servo_output > SERVO_MAX){
+      servo_output = SERVO_MAX;
+    }
+  }
+  
   myservo.writeMicroseconds(servo_output);  //write to servo
   
   /*RATE-LIMITED DEBUG OUTPUT*/
@@ -145,24 +148,22 @@ void loop() {
   if(debug_counter >= DEBUG_PRINT_INTERVAL){
     debug_counter = 0;
     
-    // Convert servo position to degrees for easier reading
-    float servo_degrees = mapfloat((float)servo_output, SERVO_MIN, SERVO_MAX, 0.0, 180.0);
-    
-    // Print key variables in clean format
-    Serial.print("Ball: ");
-    Serial.print(sensor_filtered, 1);
-    Serial.print(" | Servo: ");
-    Serial.print(servo_output, 1);
-    Serial.print(" | Error: ");
-    Serial.print(error, 1);
-    Serial.print(" | P: ");
-    Serial.print(Kp*error);
-    Serial.print(" | I: ");
-    Serial.print(Ki*integral);
-    Serial.print(" | D: ");
-    Serial.print(Kd*derivative);
-    Serial.print(" | Loop(ms): ");
-    Serial.println(millis() - my_time);
+    if(ball_detected) {
+      // Print key variables in clean format
+      Serial.print("Ball: ");
+      Serial.print(sensor_filtered, 1);
+      Serial.print(" | Servo: ");
+      Serial.print(servo_output);
+      Serial.print(" | Error: ");
+      Serial.print(error, 1);
+      Serial.print(" | Output: ");
+      Serial.print(output, 1);
+      Serial.print(" | Loop(ms): ");
+      Serial.println(millis() - my_time);
+    }
+    else {
+      Serial.println("NO BALL - Reset to center");
+    }
   }
   
   /*WAIT FOR DELTA T*/

@@ -65,6 +65,8 @@ def arduino_communication_thread():
     Also reads and displays debug output from Arduino.
     """
     print("[ARDUINO THREAD] Started")
+    consecutive_errors = 0
+    error_message_shown = False
     
     while not shutdown_event.is_set():
         try:
@@ -74,8 +76,14 @@ def arduino_communication_thread():
                 try:
                     ser.write(f"{ball_x}\n".encode('utf-8'))
                     ser.flush()
+                    consecutive_errors = 0  # Reset error counter on success
+                    error_message_shown = False  # Reset error message flag
                 except serial.SerialException as e:
-                    print(f"[SERIAL ERROR] {e}")
+                    consecutive_errors += 1
+                    if not error_message_shown:
+                        print(f"[SERIAL ERROR] {e} - Will keep retrying...")
+                        error_message_shown = True
+                    time.sleep(0.05)  # Brief delay on error to avoid hammering
             
             # Read and print debug output from Arduino
             if ser.in_waiting > 0:
@@ -86,12 +94,15 @@ def arduino_communication_thread():
                 except UnicodeDecodeError:
                     pass  # Ignore decode errors from partial reads
                 except Exception as e:
-                    print(f"[READ ERROR] {e}")
+                    pass  # Silently ignore read errors
             else:
                 time.sleep(0.001)  # Small delay to prevent busy-waiting
                 
         except Exception as e:
-            print(f"[ARDUINO THREAD ERROR] {e}")
+            consecutive_errors += 1
+            if not error_message_shown:
+                print(f"[ARDUINO THREAD ERROR] {e} - Will keep retrying...")
+                error_message_shown = True
             time.sleep(0.1)
     
     print("[ARDUINO THREAD] Stopped")
@@ -148,6 +159,14 @@ try:
                 except:
                     pass
             ball_position_queue.put(ball_x)
+        else:  # No ball detected
+            # Send -1 to signal Arduino to reset to center
+            if ball_position_queue.full():
+                try:
+                    ball_position_queue.get_nowait()  # Remove old position
+                except:
+                    pass
+            ball_position_queue.put(-1)
         
         # Calculate FPS
         frame_count += 1
