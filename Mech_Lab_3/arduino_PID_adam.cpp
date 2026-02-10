@@ -16,9 +16,9 @@ instead of degrees for finer control*/
 #define DT 0.0055  //seconds
   
 /*PID PARAMETERS*/
-#define Kp 0.3    //proportional coefficient
-#define Ki 0.01    //integral coefficient
-#define Kd 0.05    //derivative coefficient
+#define Kp 2    //proportional coefficient
+#define Ki 0.2    //integral coefficient
+#define Kd 1.2    //derivative coefficient
   
 /*UPSCALING TO Servo.writeMilliseconds*/
 #define OUTPUT_UPSCALE_FACTOR 1
@@ -35,9 +35,9 @@ instead of degrees for finer control*/
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
   
 Servo myservo;
-  
+
 /*ARDUINO PINS*/
-int pot_pin = 1;
+#define pot_pin A0
 int servo_pin = 3;
   
 /*EMA VARIABLE INITIALIZATIONS*/
@@ -72,7 +72,6 @@ void loop() {
     
   /*MAP POT POSITION TO CM SETPOINT RANGE*/
   float setpoint = mapfloat((float)pot_filtered, 0.0, 1024.0, REFERENCE_MIN, REFERENCE_MAX);
-  setpoint = 320;
   
   /*READ SENSOR DATA*/
   int sensor_value = last_sensor_value;  //default to last sensor value if no new data is available
@@ -130,7 +129,7 @@ void loop() {
     output = (Kp*error + Ki*integral + Kd*derivative)*OUTPUT_UPSCALE_FACTOR;
     previous_error = error;
     
-    // Calculate servo output with saturation (negated for inverted servo direction)
+    // Calculate servo output with saturation
     servo_output = round(-output) + SERVO_OFFSET;
       
     if(servo_output < SERVO_MIN){ //saturate servo output at min/max range 
@@ -150,7 +149,9 @@ void loop() {
     
     if(ball_detected) {
       // Print key variables in clean format
-      Serial.print("Ball: ");
+      Serial.print("Setpoint: ");
+      Serial.print(setpoint, 1);
+      Serial.print(" | Ball: ");
       Serial.print(sensor_filtered, 1);
       Serial.print(" | Servo: ");
       Serial.print(servo_output);

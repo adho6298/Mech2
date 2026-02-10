@@ -167,7 +167,6 @@ try:
                 except:
                     pass
             ball_position_queue.put(-1)
-        
         # Calculate FPS
         frame_count += 1
         elapsed_time = time.time() - start_time
