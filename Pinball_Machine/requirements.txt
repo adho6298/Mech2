@@ -1,0 +1,37 @@
+# Pinball Machine Dependencies
+# Install on Raspberry Pi 5: pip install -r requirements.txt
+
+# =============================================================================
+# SCOREBOARD (Score.py) & DISPLAY TEST (display_test.py)
+# =============================================================================
+
+# LCD control library with I2C support
+RPLCD>=1.3.0
+
+# High-level GPIO library (Pi 5 compatible)
+gpiozero>=2.0
+
+# GPIO backend for Raspberry Pi 5
+lgpio>=0.2.2
+
+# Non-blocking keyboard input for reset functionality
+pynput>=1.7.6
+
+# SMBus for I2C communication (usually pre-installed on Pi OS)
+smbus2>=0.4.0
+
+# =============================================================================
+# BALL DETECTION CAMERA (Pinball_Camera.py)
+# =============================================================================
+
+# Raspberry Pi Camera interface
+picamera2>=0.3.12
+
+# Computer vision library
+opencv-python>=4.8.0
+
+# Numerical operations for image processing
+numpy>=1.24.0
+
+# Legacy GPIO library (used by Pinball_Camera.py)
+RPi.GPIO>=0.7.1
