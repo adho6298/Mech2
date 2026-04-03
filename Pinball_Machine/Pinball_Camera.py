@@ -59,12 +59,12 @@ import RPi.GPIO as GPIO
 Adjust these values to tune detection behavior
 """
 # Camera frame dimensions (pixels)
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 64
+FRAME_WIDTH = 1280  
+FRAME_HEIGHT = 720
 
 # Brightness threshold for ball detection (0-255)
 # Over threshold = white (ball), under threshold = black (background)
-BRIGHTNESS_THRESHOLD = 127
+BRIGHTNESS_THRESHOLD = 150
 
 # GPIO pin numbers for relay control (BCM numbering)
 LEFT_RELAY_PIN = 17
@@ -72,11 +72,11 @@ RIGHT_RELAY_PIN = 27
 
 # Hit time (seconds) - how long to hold relay HIGH for full solenoid actuation
 # Also used as wait time after release for solenoid to return to rest position
-HIT_TIME = 0.05
+HIT_TIME = 10.00
 
 # Extra cooldown time (seconds) after hit cycle completes
 # Total cooldown = HIT_TIME * 2 + EXTRA_COOLDOWN
-EXTRA_COOLDOWN = 0.4
+EXTRA_COOLDOWN = 0.0
 
 # Calculated total cooldown (do not modify directly)
 DETECTION_COOLDOWN = HIT_TIME * 2 + EXTRA_COOLDOWN
