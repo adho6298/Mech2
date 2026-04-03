@@ -2,6 +2,9 @@
 int state = 0;
 const int spk = 11;
 unsigned long millis1 = millis();
+int winpin = 7;
+int scorepin = 8;
+int startpin = 2;
 
 
 // SOUND FUNCTION LIBRARY
@@ -139,11 +142,12 @@ void raygun(int baseHz, int peakHz, int lengthMs) {
 
 
 void setup() {
-  pinMode(7, INPUT_PULLUP);
-  pinMode(8, INPUT_PULLUP);
+  pinMode(winpin, INPUT_PULLUP);
+  pinMode(scorepin, INPUT_PULLUP);
+  pinMode(startpin, INPUT_PULLUP);
 
   // STARTUP NOISES
-  //powerUpSequence();
+  powerUpSequence();
   delay(1000);
   tone(spk,200);
   delay(100);
@@ -268,16 +272,16 @@ void loop() {
   }
 
   // CHECK STATE
-  int red = digitalRead(8);
-  int green = digitalRead(7);
+  int score = digitalRead(scorepin);
+  int win = digitalRead(winpin);
 
-  if (red == LOW){
+  if (score == LOW){
     state = 2;
   }
-  else if (green == LOW){
+  else if (win == LOW){
     state = 3;
   }
-  else if (red == HIGH && green == HIGH) {
+  else if (score == HIGH && win == HIGH) {
     state =1;
   }
 }
