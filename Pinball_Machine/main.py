@@ -35,7 +35,7 @@ from signal import signal, SIGINT
 # ==============================================================================
 
 # Scoring
-SCORE_LIMIT = 10            # First to reach this wins (0 = no limit)
+SCORE_LIMIT = 7            # First to reach this wins (0 = no limit)
 
 # Timing
 DEBOUNCE_TIME        = 0.2  # Seconds — drain switch software debounce
