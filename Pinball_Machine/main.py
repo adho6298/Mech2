@@ -618,6 +618,7 @@ def init_gpio() -> bool:
             print(f"[OK] P1 buttons: LEFT=GPIO{P1_LEFT_BTN_PIN}, "
                   f"RIGHT=GPIO{P1_RIGHT_BTN_PIN}")
         else:
+            #hi
             print("[WARN] P1 button GPIO pins not set — update P1_LEFT/RIGHT_BTN_PIN "
                   "in the config block")
 
