@@ -5,7 +5,7 @@ import serial
 
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
-ser = serial.Serial('/dev/ttyACM0',9600)
+#ser = serial.Serial('/dev/ttyACM0',9600)
 baud_rate = 9600
 
 if not cap.isOpened():                      #error loop
