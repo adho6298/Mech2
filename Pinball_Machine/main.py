@@ -28,14 +28,13 @@ See plan.md for full hardware wiring and GPIO pin assignments.
 import time
 import threading
 from enum import Enum
-from signal import signal, SIGINT
 
 # ==============================================================================
 # CONFIGURATION — edit these values to match your wiring
 # ==============================================================================
 
 # Scoring
-SCORE_LIMIT = 7            # First to reach this wins (0 = no limit)
+SCORE_LIMIT = 3            # First to reach this wins — Arduino plays game-over animation at 3
 
 # Timing
 DEBOUNCE_TIME        = 0.2  # Seconds — drain switch software debounce
@@ -51,28 +50,30 @@ LCD2_ADDR = 0x26            # Solder A0 jumper to set this address
 # GPIO — drain switches (inputs, active-LOW with pull-up)
 # Ball drains on P1's side  →  P2 scores
 # Ball drains on P2's side  →  P1 scores
-P1_DRAIN_PIN = 22           # Physical pin 15 — existing from Score.py
-P2_DRAIN_PIN = 23           # Physical pin 16 — existing from Score.py
+P1_DRAIN_PIN = 5            # Physical pin 29
+P2_DRAIN_PIN = 6            # Physical pin 31
 
-# GPIO — P2 flipper relays (outputs) — used by CV mode AND human P2 mode
-P2_LEFT_RELAY_PIN  = 17     # Physical pin 11 — existing from Pinball_Camera.py
-P2_RIGHT_RELAY_PIN = 27     # Physical pin 13 — existing from Pinball_Camera.py
+# GPIO — P1 (Red) flipper buttons (inputs, active-LOW with pull-up)
+P1_LEFT_BTN_PIN  = 9        # Physical pin 21 — Red Left Button
+P1_RIGHT_BTN_PIN = 16       # Physical pin 36 — Red Right Button (GPIO 14 avoided: UART TX conflict)
 
-# GPIO — P1 flipper buttons (inputs, active-LOW with pull-up)  *** SET THESE ***
-P1_LEFT_BTN_PIN  = None     # TODO: e.g. GPIO 5  (pin 29)
-P1_RIGHT_BTN_PIN = None     # TODO: e.g. GPIO 6  (pin 31)
+# GPIO — P1 (Red) flipper relays (outputs)
+P1_LEFT_RELAY_PIN  = 11     # Physical pin 23 — Red Left Relay
+P1_RIGHT_RELAY_PIN = 15     # Physical pin 10 — Red Right Relay
 
-# GPIO — P1 flipper relays (outputs)  *** SET THESE ***
-P1_LEFT_RELAY_PIN  = None   # TODO: e.g. GPIO 5  (pin 29)
-P1_RIGHT_RELAY_PIN = None   # TODO: e.g. GPIO 6  (pin 31)
+# GPIO — P2 (Blue) flipper relays (outputs) — used by CV mode AND human P2 mode
+P2_LEFT_RELAY_PIN  = 27     # Physical pin 13 — Blue Left Relay
+P2_RIGHT_RELAY_PIN = 10     # Physical pin 19 — Blue Right Relay
 
-# GPIO — P2 flipper buttons (inputs, active-LOW with pull-up) — human P2 mode only
-P2_LEFT_BTN_PIN  = None     # TODO: set when wired
-P2_RIGHT_BTN_PIN = None     # TODO: set when wired
+# GPIO — P2 (Blue) flipper buttons (inputs, active-LOW with pull-up) — human P2 mode only
+P2_LEFT_BTN_PIN  = 17       # Physical pin 11 — Blue Left Button
+P2_RIGHT_BTN_PIN = 22       # Physical pin 15 — Blue Right Button
 
-# GPIO — Arduino signal pins (stub — TBD when communication method is finalised)
-ARDUINO_LED_PIN   = None
-ARDUINO_SOUND_PIN = None
+# GPIO — Arduino signal pins (outputs, active-HIGH) — pulsed on game events
+ARDUINO_P1_SCORE_PIN = 18   # Physical pin 12 — Red  player scored
+ARDUINO_P2_SCORE_PIN = 23   # Physical pin 16 — Blue player scored
+ARDUINO_START_PIN    = 24   # Physical pin 18 — Game start
+ARDUINO_PULSE_TIME   = 0.1  # Seconds — how long the signal pin is held HIGH
 
 # Camera detection tuning (from Pinball_Camera.py)
 FRAME_WIDTH          = 640
@@ -156,6 +157,10 @@ p1_right_relay = None
 p2_left_relay  = None
 p2_right_relay = None
 
+arduino_p1_score_dev = None
+arduino_p2_score_dev = None
+arduino_start_dev    = None
+
 camera_thread  = None
 
 # ==============================================================================
@@ -189,8 +194,7 @@ def write_to_lcds(line1: str, line2: str):
         return
     for lcd in lcds:
         try:
-            lcd.clear()
-            lcd.cursor_pos = (0, 0)
+            lcd.home()
             lcd.write_string(line1)
             lcd.cursor_pos = (1, 0)
             lcd.write_string(line2)
@@ -253,21 +257,45 @@ def close_lcds():
             pass
 
 # ==============================================================================
-# ARDUINO SIGNALING — stub, details TBD
+# ARDUINO SIGNALING
 # ==============================================================================
 
 def arduino_signal(event: str):
     """
-    Placeholder for Arduino LED / sound signaling.
-    Called at every significant game event.
+    Pulses the appropriate Arduino signal pin HIGH for ARDUINO_PULSE_TIME seconds.
+    The Arduino reads these as digitalRead() inputs.
 
-    Events: 'attract', 'game_start', 'p1_scored', 'p2_scored', 'p1_wins', 'p2_wins'
+    Signals sent by the RPi:
+      'game_start' — pulse GPIO 24 once; Arduino begins game mode
+      'p1_scored'  — pulse GPIO 18 once; Arduino increments P1 count
+      'p2_scored'  — pulse GPIO 23 once; Arduino increments P2 count
 
-    Fill in the implementation once the Arduino communication method
-    (GPIO pins / serial protocol) is finalised.
+    The Arduino tracks the score independently and plays the game-over
+    animation automatically when either player reaches 3.
     """
     print(f"[ARDUINO] Event: {event}")
-    # TODO: drive ARDUINO_LED_PIN / ARDUINO_SOUND_PIN here
+
+    if event == "game_start":
+        device = arduino_start_dev
+    elif event == "p1_scored":
+        device = arduino_p1_score_dev
+    elif event == "p2_scored":
+        device = arduino_p2_score_dev
+    else:
+        return  # 'attract', 'p1_wins', 'p2_wins' — Arduino handles these autonomously
+
+    if device is None:
+        return
+
+    def _pulse():
+        try:
+            device.on()
+            time.sleep(ARDUINO_PULSE_TIME)
+            device.off()
+        except Exception as e:
+            print(f"[ARDUINO] Pulse error: {e}")
+
+    threading.Thread(target=_pulse, daemon=True).start()
 
 # ==============================================================================
 # RELAY HELPERS
@@ -340,10 +368,12 @@ class CameraThread:
 
     def _pulse_relay(self, relay):
         """Pulse relay HIGH for CV_HIT_TIME — used for CV auto-flipping."""
-        _relay_on(relay)
-        time.sleep(CV_HIT_TIME)
-        _relay_off(relay)
-        time.sleep(CV_HIT_TIME)
+        try:
+            _relay_on(relay)
+            time.sleep(CV_HIT_TIME)
+        finally:
+            _relay_off(relay)
+            time.sleep(CV_HIT_TIME)
 
     def _run(self):
         if not CAMERA_AVAILABLE:
@@ -435,7 +465,10 @@ def on_p1_left_press():
     if game_state == GameState.ATTRACT:
         game_state = GameState.MODE_SELECT
     elif game_state == GameState.MODE_SELECT:
-        p1_btn_press_time["left"] = time.time()
+        now = time.time()
+        if now - p1_btn_press_time["right"] > SIMULTANEOUS_WINDOW:
+            p1_btn_press_time["right"] = 0.0  # discard if stale
+        p1_btn_press_time["left"] = now
         _cycle_mode("left")
         _check_simultaneous_confirm()
     elif game_state in (GameState.GAMEPLAY, GameState.POINT_SCORED):
@@ -454,7 +487,10 @@ def on_p1_right_press():
     if game_state == GameState.ATTRACT:
         game_state = GameState.MODE_SELECT
     elif game_state == GameState.MODE_SELECT:
-        p1_btn_press_time["right"] = time.time()
+        now = time.time()
+        if now - p1_btn_press_time["left"] > SIMULTANEOUS_WINDOW:
+            p1_btn_press_time["left"] = 0.0  # discard if stale
+        p1_btn_press_time["right"] = now
         _cycle_mode("right")
         _check_simultaneous_confirm()
     elif game_state in (GameState.GAMEPLAY, GameState.POINT_SCORED):
@@ -535,6 +571,7 @@ def init_gpio() -> bool:
     global p2_left_btn, p2_right_btn
     global p1_left_relay, p1_right_relay
     global p2_left_relay, p2_right_relay
+    global arduino_p1_score_dev, arduino_p2_score_dev, arduino_start_dev
 
     if not HARDWARE_AVAILABLE:
         print("[SIM] GPIO initialised (keyboard simulation active)")
@@ -544,13 +581,21 @@ def init_gpio() -> bool:
         _gpio_factory = LGPIOFactory()
 
         # Drain switches
-        p1_drain_btn = Button(P1_DRAIN_PIN, pull_up=True, bounce_time=0.05,
-                              pin_factory=_gpio_factory)
-        p2_drain_btn = Button(P2_DRAIN_PIN, pull_up=True, bounce_time=0.05,
-                              pin_factory=_gpio_factory)
-        p1_drain_btn.when_pressed = lambda: on_drain("P1")
-        p2_drain_btn.when_pressed = lambda: on_drain("P2")
-        print(f"[OK] Drain switches: P1=GPIO{P1_DRAIN_PIN}, P2=GPIO{P2_DRAIN_PIN}")
+        if P1_DRAIN_PIN is not None:
+            p1_drain_btn = Button(P1_DRAIN_PIN, pull_up=True, bounce_time=0.05,
+                                  pin_factory=_gpio_factory)
+            p1_drain_btn.when_pressed = lambda: on_drain("P1")
+            print(f"[OK] P1 drain switch: GPIO{P1_DRAIN_PIN}")
+        else:
+            print("[WARN] P1 drain switch not configured — set P1_DRAIN_PIN")
+
+        if P2_DRAIN_PIN is not None:
+            p2_drain_btn = Button(P2_DRAIN_PIN, pull_up=True, bounce_time=0.05,
+                                  pin_factory=_gpio_factory)
+            p2_drain_btn.when_pressed = lambda: on_drain("P2")
+            print(f"[OK] P2 drain switch: GPIO{P2_DRAIN_PIN}")
+        else:
+            print("[WARN] P2 drain switch not configured — set P2_DRAIN_PIN")
 
         # P2 flipper relays (always present)
         p2_left_relay  = OutputDevice(P2_LEFT_RELAY_PIN,  initial_value=False,
@@ -604,6 +649,16 @@ def init_gpio() -> bool:
             print("[WARN] P2 button GPIO pins not set — update P2_LEFT/RIGHT_BTN_PIN "
                   "in the config block")
 
+        # Arduino signal output pins
+        arduino_p1_score_dev = OutputDevice(ARDUINO_P1_SCORE_PIN, initial_value=False,
+                                            pin_factory=_gpio_factory)
+        arduino_p2_score_dev = OutputDevice(ARDUINO_P2_SCORE_PIN, initial_value=False,
+                                            pin_factory=_gpio_factory)
+        arduino_start_dev    = OutputDevice(ARDUINO_START_PIN,    initial_value=False,
+                                            pin_factory=_gpio_factory)
+        print(f"[OK] Arduino signals: P1_SCORE=GPIO{ARDUINO_P1_SCORE_PIN}, "
+              f"P2_SCORE=GPIO{ARDUINO_P2_SCORE_PIN}, START=GPIO{ARDUINO_START_PIN}")
+
         return True
 
     except Exception as e:
@@ -620,7 +675,8 @@ def cleanup_gpio():
                    p1_left_btn, p1_right_btn,
                    p2_left_btn, p2_right_btn,
                    p1_left_relay, p1_right_relay,
-                   p2_left_relay, p2_right_relay):
+                   p2_left_relay, p2_right_relay,
+                   arduino_p1_score_dev, arduino_p2_score_dev, arduino_start_dev):
         if device is not None:
             try:
                 device.close()
@@ -730,7 +786,7 @@ def _start_sim_keyboard():
 # ==============================================================================
 
 def run():
-    global game_state, running
+    global game_state, running, mode_select_idx, camera_thread
 
     print("=" * 52)
     print("   PINBALL MACHINE — MAIN CONTROLLER")
@@ -746,7 +802,6 @@ def run():
     if not init_gpio():
         print("[ERROR] GPIO init failed — inputs/outputs may not work")
 
-    global camera_thread
     camera_thread = CameraThread()
 
     sim_listener = None
@@ -773,7 +828,6 @@ def run():
                     arduino_signal("attract")
 
                 elif current == GameState.MODE_SELECT:
-                    global mode_select_idx
                     mode_select_idx = 0
                     p1_btn_press_time["left"]  = 0.0
                     p1_btn_press_time["right"] = 0.0
@@ -804,7 +858,7 @@ def run():
                         camera_thread.stop()
                     all_relays_off()
                     winner = last_scorer
-                    arduino_signal(f"{'p1' if winner == 'P1' else 'p2'}_wins")
+                    # No signal sent here — Arduino counts to 3 and plays game-over animation itself
                     # Flash winner message
                     for _ in range(5):
                         show_winner(winner)
@@ -825,8 +879,6 @@ def run():
                 if SCORE_LIMIT > 0 and scores.get(last_scorer, 0) >= SCORE_LIMIT:
                     game_state = GameState.GAME_OVER
                 else:
-                    if p2_mode == "CV":
-                        camera_thread.resume()
                     show_scores()
                     game_state = GameState.GAMEPLAY
                 prev_state = None  # Force re-entry of next state
@@ -857,5 +909,4 @@ def run():
 # ==============================================================================
 
 if __name__ == "__main__":
-    signal(SIGINT, lambda s, f: None)   # Let KeyboardInterrupt reach run()
     run()
