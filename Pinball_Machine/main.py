@@ -607,9 +607,9 @@ def init_gpio() -> bool:
 
         # P1 flipper buttons (optional until pins are confirmed)
         if P1_LEFT_BTN_PIN is not None and P1_RIGHT_BTN_PIN is not None:
-            p1_left_btn  = Button(P1_LEFT_BTN_PIN,  pull_up=True, bounce_time=0.02,
+            p1_left_btn  = Button(P1_LEFT_BTN_PIN,  pull_up=False, bounce_time=0.02,
                                   pin_factory=_gpio_factory)
-            p1_right_btn = Button(P1_RIGHT_BTN_PIN, pull_up=True, bounce_time=0.02,
+            p1_right_btn = Button(P1_RIGHT_BTN_PIN, pull_up=False, bounce_time=0.02,
                                   pin_factory=_gpio_factory)
             p1_left_btn.when_pressed   = on_p1_left_press
             p1_left_btn.when_released  = on_p1_left_release
@@ -635,9 +635,9 @@ def init_gpio() -> bool:
 
         # P2 human flipper buttons (optional)
         if P2_LEFT_BTN_PIN is not None and P2_RIGHT_BTN_PIN is not None:
-            p2_left_btn  = Button(P2_LEFT_BTN_PIN,  pull_up=True, bounce_time=0.02,
+            p2_left_btn  = Button(P2_LEFT_BTN_PIN,  pull_up=False, bounce_time=0.02,
                                   pin_factory=_gpio_factory)
-            p2_right_btn = Button(P2_RIGHT_BTN_PIN, pull_up=True, bounce_time=0.02,
+            p2_right_btn = Button(P2_RIGHT_BTN_PIN, pull_up=False, bounce_time=0.02,
                                   pin_factory=_gpio_factory)
             p2_left_btn.when_pressed   = on_p2_left_press
             p2_left_btn.when_released  = on_p2_left_release
