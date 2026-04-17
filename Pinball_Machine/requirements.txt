@@ -1,37 +1,55 @@
 # Pinball Machine Dependencies
-# Install on Raspberry Pi 5: pip install -r requirements.txt
+# This Pi runs system Python 3.13 (/usr/bin/python3) — NO virtual environment.
+#
+# Most packages are installed via apt (system-wide). Only RPLCD requires pip.
+#
+# -----------------------------------------------------------------------------
+# INSTALL VIA APT (system packages — already included in Raspberry Pi OS):
+# -----------------------------------------------------------------------------
+#   sudo apt install python3-gpiozero python3-lgpio python3-smbus2
+#                    python3-picamera2 python3-opencv python3-numpy
+#                    python3-rpi.gpio python3-pynput
+#
+# -----------------------------------------------------------------------------
+# INSTALL VIA PIP (no apt package available):
+# -----------------------------------------------------------------------------
+#   sudo pip3 install RPLCD --break-system-packages
+#
+# -----------------------------------------------------------------------------
+# PACKAGE LIST (for reference / reprovisioning)
+# -----------------------------------------------------------------------------
 
 # =============================================================================
 # SCOREBOARD (Score.py) & DISPLAY TEST (display_test.py)
 # =============================================================================
 
-# LCD control library with I2C support
+# LCD control library with I2C support — pip only (no apt package)
 RPLCD>=1.3.0
 
-# High-level GPIO library (Pi 5 compatible)
+# High-level GPIO library (Pi 5 compatible) — apt: python3-gpiozero
 gpiozero>=2.0
 
-# GPIO backend for Raspberry Pi 5
+# GPIO backend for Raspberry Pi 5 — apt: python3-lgpio
 lgpio>=0.2.2
 
-# Non-blocking keyboard input for reset functionality
+# Non-blocking keyboard input for reset functionality — apt: python3-pynput
 pynput>=1.7.6
 
-# SMBus for I2C communication (usually pre-installed on Pi OS)
+# SMBus for I2C communication — apt: python3-smbus2
 smbus2>=0.4.0
 
 # =============================================================================
-# BALL DETECTION CAMERA (Pinball_Camera.py)
+# BALL DETECTION CAMERA (Pinball_Camera.py / main.py)
 # =============================================================================
 
-# Raspberry Pi Camera interface
+# Raspberry Pi Camera interface — apt: python3-picamera2 (system package only)
 picamera2>=0.3.12
 
-# Computer vision library
+# Computer vision library — apt: python3-opencv
 opencv-python>=4.8.0
 
-# Numerical operations for image processing
+# Numerical operations for image processing — apt: python3-numpy
 numpy>=1.24.0
 
-# Legacy GPIO library (used by Pinball_Camera.py)
+# Legacy GPIO library (used by Pinball_Camera.py) — apt: python3-rpi.gpio
 RPi.GPIO>=0.7.1

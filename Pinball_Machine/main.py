@@ -77,8 +77,8 @@ ARDUINO_PULSE_TIME   = 0.1  # Seconds — how long the signal pin is held HIGH
 
 # Camera detection tuning (from Pinball_Camera.py)
 FRAME_WIDTH          = 640
-FRAME_HEIGHT         = 64
-BRIGHTNESS_THRESHOLD = 127
+FRAME_HEIGHT         = 240
+BRIGHTNESS_THRESHOLD = 180
 CV_HIT_TIME          = 0.05  # Seconds — relay pulse duration per CV flipper hit
 CV_EXTRA_COOLDOWN    = 0.4   # Seconds — additional cooldown after hit cycle
 
@@ -140,6 +140,9 @@ mode_select_idx = 0
 
 # P1 button timestamps — used to detect simultaneous press
 p1_btn_press_time = {"left": 0.0, "right": 0.0}
+
+# Pending deferred cycle timer (cancelled if simultaneous press detected)
+_pending_cycle_timer = None
 
 # Hardware handles
 lcds           = []
@@ -465,12 +468,10 @@ def on_p1_left_press():
     if game_state == GameState.ATTRACT:
         game_state = GameState.MODE_SELECT
     elif game_state == GameState.MODE_SELECT:
-        now = time.time()
-        if now - p1_btn_press_time["right"] > SIMULTANEOUS_WINDOW:
-            p1_btn_press_time["right"] = 0.0  # discard if stale
-        p1_btn_press_time["left"] = now
-        _cycle_mode("left")
-        _check_simultaneous_confirm()
+        p1_btn_press_time["left"] = time.time()
+        _cancel_pending_cycle()
+        if not _check_simultaneous_confirm():
+            _schedule_cycle("left")
     elif game_state in (GameState.GAMEPLAY, GameState.POINT_SCORED):
         _relay_on(p1_left_relay)
         print("[FLIPPER] P1 left ON")
@@ -487,12 +488,10 @@ def on_p1_right_press():
     if game_state == GameState.ATTRACT:
         game_state = GameState.MODE_SELECT
     elif game_state == GameState.MODE_SELECT:
-        now = time.time()
-        if now - p1_btn_press_time["left"] > SIMULTANEOUS_WINDOW:
-            p1_btn_press_time["left"] = 0.0  # discard if stale
-        p1_btn_press_time["right"] = now
-        _cycle_mode("right")
-        _check_simultaneous_confirm()
+        p1_btn_press_time["right"] = time.time()
+        _cancel_pending_cycle()
+        if not _check_simultaneous_confirm():
+            _schedule_cycle("right")
     elif game_state in (GameState.GAMEPLAY, GameState.POINT_SCORED):
         _relay_on(p1_right_relay)
         print("[FLIPPER] P1 right ON")
@@ -543,10 +542,32 @@ def _cycle_mode(direction: str):
     print(f"[MODE] Highlighted: {MODE_OPTIONS[mode_select_idx]}")
 
 
+def _cancel_pending_cycle():
+    """Cancel any deferred single-button cycle that hasn't fired yet."""
+    global _pending_cycle_timer
+    if _pending_cycle_timer is not None:
+        _pending_cycle_timer.cancel()
+        _pending_cycle_timer = None
+
+
+def _schedule_cycle(direction: str):
+    """Defer a mode cycle by SIMULTANEOUS_WINDOW so a second button press can cancel it."""
+    global _pending_cycle_timer
+
+    def _do_cycle():
+        global _pending_cycle_timer
+        _pending_cycle_timer = None
+        if game_state == GameState.MODE_SELECT:
+            _cycle_mode(direction)
+
+    _pending_cycle_timer = threading.Timer(SIMULTANEOUS_WINDOW, _do_cycle)
+    _pending_cycle_timer.start()
+
+
 def _check_simultaneous_confirm():
     """
     Confirm mode selection if both P1 buttons were pressed within
-    SIMULTANEOUS_WINDOW of each other.
+    SIMULTANEOUS_WINDOW of each other.  Returns True if confirmed.
     """
     global game_state, p2_mode
     left_t  = p1_btn_press_time["left"]
@@ -559,6 +580,8 @@ def _check_simultaneous_confirm():
         p2_mode  = "CV" if selected == "1P vs CPU" else "HUMAN"
         print(f"[MODE] Confirmed: {selected}  (p2_mode={p2_mode})")
         game_state = GameState.GAME_START
+        return True
+    return False
 
 # ==============================================================================
 # GPIO INIT & CLEANUP
@@ -734,6 +757,7 @@ def _start_sim_keyboard():
                 _cycle_mode("right")
             elif ch in (' ', '\r'):
                 # Simulate simultaneous press by zeroing the delta
+                _cancel_pending_cycle()
                 p1_btn_press_time["left"]  = time.time()
                 p1_btn_press_time["right"] = time.time()
                 _check_simultaneous_confirm()
