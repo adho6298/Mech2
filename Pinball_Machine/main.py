@@ -78,7 +78,7 @@ ARDUINO_PULSE_TIME   = 0.1  # Seconds — how long the signal pin is held HIGH
 # Camera detection tuning (from Pinball_Camera.py)
 FRAME_WIDTH          = 640
 FRAME_HEIGHT         = 240
-BRIGHTNESS_THRESHOLD = 180
+BRIGHTNESS_THRESHOLD = 175
 CV_HIT_TIME          = 0.05  # Seconds — relay pulse duration per CV flipper hit
 CV_EXTRA_COOLDOWN    = 0.4   # Seconds — additional cooldown after hit cycle
 
@@ -393,8 +393,13 @@ class CameraThread:
         picam2.configure(cfg)
         picam2.start()
 
-        midpoint = FRAME_WIDTH // 2
-        kernel   = np.ones((3, 3), np.uint8)
+        cv2.namedWindow("Ball Tracker", cv2.WINDOW_AUTOSIZE)
+
+        midpoint    = FRAME_WIDTH // 2
+        kernel      = np.ones((3, 3), np.uint8)
+        frame_count = 0
+        loop_start  = time.time()
+        fps         = 0.0
 
         try:
             while not self._stop.is_set():
@@ -428,8 +433,45 @@ class CameraThread:
                     self._pulse_relay(p2_right_relay)
                     self._right_cooldown_end = time.time() + CV_EXTRA_COOLDOWN
 
+                # Build display frame — mirrors Pinball_Camera.py visualization
+                display = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+                cv2.line(display, (midpoint, 0), (midpoint, FRAME_HEIGHT - 1),
+                         (255, 255, 0), 1)
+
+                if left_total > 0:
+                    left_centroid = int(
+                        np.dot(np.arange(midpoint), left_sums) / left_total
+                    )
+                    cv2.line(display,
+                             (left_centroid, 0), (left_centroid, FRAME_HEIGHT - 1),
+                             (0, 255, 0), 2)
+
+                if right_total > 0:
+                    right_centroid = midpoint + int(
+                        np.dot(np.arange(len(right_sums)), right_sums) / right_total
+                    )
+                    cv2.line(display,
+                             (right_centroid, 0), (right_centroid, FRAME_HEIGHT - 1),
+                             (0, 0, 255), 2)
+
+                # FPS tracking
+                frame_count += 1
+                elapsed = time.time() - loop_start
+                if elapsed >= 1.0:
+                    fps         = frame_count / elapsed
+                    frame_count = 0
+                    loop_start  = time.time()
+
+                cv2.putText(display,
+                            f"FPS:{fps:.0f}  L:{left_total}  R:{right_total}",
+                            (4, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 1)
+
+                cv2.imshow("Ball Tracker", display)
+                cv2.waitKey(1)
+
         finally:
             picam2.stop()
+            cv2.destroyWindow("Ball Tracker")
             print("[CAM] Camera released")
 
 # ==============================================================================
