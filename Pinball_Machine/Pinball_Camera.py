@@ -59,10 +59,25 @@ TROUBLESHOOTING:
 import sys
 import argparse
 import time
+import os
 import cv2
 import numpy as np
 import RPi.GPIO as GPIO
 from picamera2 import Picamera2, Preview
+
+# ==============================================================================
+# DISPLAY DETECTION — for headless systemd service support
+# ==============================================================================
+def has_display():
+    """Check if a display server is available."""
+    # Check for DISPLAY variable (X11) or QT_QPA_PLATFORM settings
+    has_x11 = os.environ.get('DISPLAY') is not None
+    # On headless systems, QT_QPA_PLATFORM will be unset or 'offscreen'
+    qt_platform = os.environ.get('QT_QPA_PLATFORM', '')
+    is_headless = qt_platform in ('', 'offscreen')
+    return has_x11 and is_headless == False
+
+DISPLAY_AVAILABLE = has_display()
 
 
 """
@@ -80,7 +95,7 @@ CAL_HEIGHT = FRAME_HEIGHT
 # Brightness threshold for ball detection (0-255)
 # Over threshold = white (ball), under = black (background)
 # Must match BRIGHTNESS_THRESHOLD in main.py
-BRIGHTNESS_THRESHOLD = 170
+BRIGHTNESS_THRESHOLD = 180
 
 # GPIO pin numbers for the P2 (Blue) relays — BCM numbering
 # Must match P2_LEFT_RELAY_PIN / P2_RIGHT_RELAY_PIN in main.py
@@ -98,13 +113,10 @@ DETECTION_COOLDOWN = HIT_TIME * 2 + EXTRA_COOLDOWN
 
 
 # ==============================================================================
-# GPIO SETUP
+# GPIO SETUP (deferred until needed)
 # ==============================================================================
-
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-GPIO.setup(LEFT_RELAY_PIN,  GPIO.OUT, initial=GPIO.LOW)
-GPIO.setup(RIGHT_RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+# Note: GPIO initialization is moved into run_detection() so calibration mode
+# can run without GPIO permissions. Only detection mode requires GPIO access.
 
 
 # ==============================================================================
@@ -132,6 +144,11 @@ def run_calibration():
     When done, copy the printed threshold into BRIGHTNESS_THRESHOLD in this
     file AND into BRIGHTNESS_THRESHOLD in main.py so both scripts match.
     """
+    if not DISPLAY_AVAILABLE:
+        print("[ERROR] Calibration mode requires a display (DISPLAY environment variable or X11)")
+        print("[ERROR] This script cannot run in headless mode for calibration.")
+        return
+    
     threshold = BRIGHTNESS_THRESHOLD
     midpoint  = FRAME_WIDTH // 2
     kernel    = np.ones((3, 3), np.uint8)
@@ -229,6 +246,12 @@ def run_calibration():
 
 def run_detection():
     """Main ball detection loop — drives relays based on ball position."""
+    # Initialize GPIO here (only for detection mode)
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    GPIO.setup(LEFT_RELAY_PIN,  GPIO.OUT, initial=GPIO.LOW)
+    GPIO.setup(RIGHT_RELAY_PIN, GPIO.OUT, initial=GPIO.LOW)
+
     midpoint = FRAME_WIDTH // 2
     kernel   = np.ones((3, 3), np.uint8)
 
@@ -248,10 +271,14 @@ def run_detection():
         buffer_count=2,
     )
     picam2.configure(camera_config)
-    picam2.start_preview(Preview.QT)
+    if DISPLAY_AVAILABLE:
+        picam2.start_preview(Preview.QT)
     picam2.start()
 
-    cv2.namedWindow("Ball Tracker", cv2.WINDOW_AUTOSIZE)
+    if DISPLAY_AVAILABLE:
+        cv2.namedWindow("Ball Tracker", cv2.WINDOW_AUTOSIZE)
+    else:
+        print("[INFO] Running in headless mode (no display). Ball detection active, visualization disabled.")
 
     try:
         while True:
@@ -326,9 +353,10 @@ def run_detection():
                 loop_start  = time.time()
 
             if frame_count % 2 == 0:
-                cv2.imshow("Ball Tracker", display)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+                if DISPLAY_AVAILABLE:
+                    cv2.imshow("Ball Tracker", display)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
 
     except KeyboardInterrupt:
         print("\n[MAIN] Shutting down...")

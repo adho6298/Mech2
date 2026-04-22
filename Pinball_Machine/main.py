@@ -28,6 +28,21 @@ See plan.md for full hardware wiring and GPIO pin assignments.
 import time
 import threading
 from enum import Enum
+import os
+
+# ==============================================================================
+# DISPLAY DETECTION — for headless systemd service support
+# ==============================================================================
+def has_display():
+    """Check if a display server is available."""
+    # Check for DISPLAY variable (X11) or QT_QPA_PLATFORM settings
+    has_x11 = os.environ.get('DISPLAY') is not None
+    # On headless systems, QT_QPA_PLATFORM will be unset or 'offscreen'
+    qt_platform = os.environ.get('QT_QPA_PLATFORM', '')
+    is_headless = qt_platform in ('', 'offscreen')
+    return has_x11 and is_headless == False
+
+DISPLAY_AVAILABLE = has_display()
 
 # ==============================================================================
 # CONFIGURATION — edit these values to match your wiring
@@ -78,7 +93,7 @@ ARDUINO_PULSE_TIME   = 0.1  # Seconds — how long the signal pin is held HIGH
 # Camera detection tuning (from Pinball_Camera.py)
 FRAME_WIDTH          = 640
 FRAME_HEIGHT         = 240
-BRIGHTNESS_THRESHOLD = 175
+BRIGHTNESS_THRESHOLD = 190
 CV_HIT_TIME          = 0.05  # Seconds — relay pulse duration per CV flipper hit
 CV_EXTRA_COOLDOWN    = 0.4   # Seconds — additional cooldown after hit cycle
 
@@ -166,6 +181,9 @@ arduino_start_dev    = None
 
 camera_thread  = None
 
+# I2C synchronization lock — prevents concurrent LCD writes that corrupt the bus
+lcd_lock = threading.Lock()
+
 # ==============================================================================
 # LCD FUNCTIONS
 # ==============================================================================
@@ -189,20 +207,41 @@ def init_lcds() -> bool:
 
 
 def write_to_lcds(line1: str, line2: str):
-    """Write identical content to both LCDs simultaneously."""
+    """Write identical content to both LCDs simultaneously with I2C synchronization."""
     line1 = line1[:16].ljust(16)
     line2 = line2[:16].ljust(16)
     if not HARDWARE_AVAILABLE:
         print(f"[LCD] \"{line1}\" | \"{line2}\"")
         return
-    for lcd in lcds:
-        try:
-            lcd.home()
-            lcd.write_string(line1)
-            lcd.cursor_pos = (1, 0)
-            lcd.write_string(line2)
-        except Exception as e:
-            print(f"[ERROR] LCD write failed: {e}")
+    
+    # Use lock to prevent concurrent I2C access that corrupts the bus
+    with lcd_lock:
+        for lcd in lcds:
+            try:
+                # Clear first to ensure clean state
+                lcd.clear()
+                time.sleep(0.01)  # I2C settle time
+                
+                # Write line 1
+                lcd.home()
+                time.sleep(0.005)  # Delay after home command
+                lcd.write_string(line1)
+                time.sleep(0.005)  # Delay after write
+                
+                # Write line 2
+                lcd.cursor_pos = (1, 0)
+                time.sleep(0.005)  # Delay after cursor move
+                lcd.write_string(line2)
+                time.sleep(0.005)  # Delay to allow I2C bus to settle
+                
+            except Exception as e:
+                print(f"[ERROR] LCD write failed: {e}")
+                try:
+                    # Attempt recovery: clear the LCD on error
+                    lcd.clear()
+                    time.sleep(0.02)
+                except Exception as recovery_error:
+                    print(f"[ERROR] LCD recovery failed: {recovery_error}")
 
 
 def show_attract():
@@ -242,22 +281,26 @@ def show_winner(winner: str):
 def clear_lcds():
     if not HARDWARE_AVAILABLE:
         return
-    for lcd in lcds:
-        try:
-            lcd.clear()
-        except Exception:
-            pass
+    with lcd_lock:
+        for lcd in lcds:
+            try:
+                lcd.clear()
+                time.sleep(0.01)  # I2C settle time after clear
+            except Exception:
+                pass
 
 
 def close_lcds():
     if not HARDWARE_AVAILABLE:
         return
-    for lcd in lcds:
-        try:
-            lcd.clear()
-            lcd.close(clear=True)
-        except Exception:
-            pass
+    with lcd_lock:
+        for lcd in lcds:
+            try:
+                lcd.clear()
+                time.sleep(0.01)  # I2C settle time
+                lcd.close(clear=True)
+            except Exception:
+                pass
 
 # ==============================================================================
 # ARDUINO SIGNALING
@@ -385,94 +428,76 @@ class CameraThread:
                 time.sleep(0.1)
             return
 
-        picam2 = Picamera2()
-        cfg = picam2.create_video_configuration(
-            main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
-            buffer_count=2
-        )
-        picam2.configure(cfg)
-        picam2.start()
-
-        cv2.namedWindow("Ball Tracker", cv2.WINDOW_AUTOSIZE)
-
-        midpoint    = FRAME_WIDTH // 2
-        kernel      = np.ones((3, 3), np.uint8)
-        frame_count = 0
-        loop_start  = time.time()
-        fps         = 0.0
-
+        picam2 = None
         try:
-            while not self._stop.is_set():
-                if not self._active.is_set():
-                    time.sleep(0.05)
-                    continue
+            picam2 = Picamera2()
+            cfg = picam2.create_video_configuration(
+                main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
+                buffer_count=2
+            )
+            picam2.configure(cfg)
+            picam2.start()
 
-                # Capture Y-plane only (grayscale, fastest path)
-                buffer = picam2.capture_buffer("main")
-                y_len  = FRAME_WIDTH * FRAME_HEIGHT
-                frame  = np.frombuffer(buffer, dtype=np.uint8, count=y_len).reshape(
-                    (FRAME_HEIGHT, FRAME_WIDTH)
-                )
+            midpoint    = FRAME_WIDTH // 2
+            kernel      = np.ones((3, 3), np.uint8)
+            frame_count = 0
+            loop_start  = time.time()
+            fps         = 0.0
 
-                mask         = np.where(frame > BRIGHTNESS_THRESHOLD, 255, 0).astype(np.uint8)
-                mask         = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-                column_sums  = np.sum(mask, axis=0)
-                left_sums    = column_sums[:midpoint]
-                right_sums   = column_sums[midpoint:]
-                left_total   = int(left_sums.sum())
-                right_total  = int(right_sums.sum())
-                now          = time.time()
+            try:
+                while not self._stop.is_set():
+                    if not self._active.is_set():
+                        time.sleep(0.05)
+                        continue
 
-                if left_total > 0 and now >= self._left_cooldown_end:
-                    print("[CAM] Ball LEFT — actuating P2 left flipper")
-                    self._pulse_relay(p2_left_relay)
-                    self._left_cooldown_end = time.time() + CV_EXTRA_COOLDOWN
-
-                if right_total > 0 and now >= self._right_cooldown_end:
-                    print("[CAM] Ball RIGHT — actuating P2 right flipper")
-                    self._pulse_relay(p2_right_relay)
-                    self._right_cooldown_end = time.time() + CV_EXTRA_COOLDOWN
-
-                # Build display frame — mirrors Pinball_Camera.py visualization
-                display = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-                cv2.line(display, (midpoint, 0), (midpoint, FRAME_HEIGHT - 1),
-                         (255, 255, 0), 1)
-
-                if left_total > 0:
-                    left_centroid = int(
-                        np.dot(np.arange(midpoint), left_sums) / left_total
+                    # Capture Y-plane only (grayscale, fastest path)
+                    buffer = picam2.capture_buffer("main")
+                    y_len  = FRAME_WIDTH * FRAME_HEIGHT
+                    frame  = np.frombuffer(buffer, dtype=np.uint8, count=y_len).reshape(
+                        (FRAME_HEIGHT, FRAME_WIDTH)
                     )
-                    cv2.line(display,
-                             (left_centroid, 0), (left_centroid, FRAME_HEIGHT - 1),
-                             (0, 255, 0), 2)
 
-                if right_total > 0:
-                    right_centroid = midpoint + int(
-                        np.dot(np.arange(len(right_sums)), right_sums) / right_total
-                    )
-                    cv2.line(display,
-                             (right_centroid, 0), (right_centroid, FRAME_HEIGHT - 1),
-                             (0, 0, 255), 2)
+                    mask         = np.where(frame > BRIGHTNESS_THRESHOLD, 255, 0).astype(np.uint8)
+                    mask         = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+                    column_sums  = np.sum(mask, axis=0)
+                    left_sums    = column_sums[:midpoint]
+                    right_sums   = column_sums[midpoint:]
+                    left_total   = int(left_sums.sum())
+                    right_total  = int(right_sums.sum())
+                    now          = time.time()
 
-                # FPS tracking
-                frame_count += 1
-                elapsed = time.time() - loop_start
-                if elapsed >= 1.0:
-                    fps         = frame_count / elapsed
-                    frame_count = 0
-                    loop_start  = time.time()
+                    if left_total > 0 and now >= self._left_cooldown_end:
+                        print("[CAM] Ball LEFT — actuating P2 left flipper")
+                        self._pulse_relay(p2_left_relay)
+                        self._left_cooldown_end = time.time() + CV_EXTRA_COOLDOWN
 
-                cv2.putText(display,
-                            f"FPS:{fps:.0f}  L:{left_total}  R:{right_total}",
-                            (4, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 1)
+                    if right_total > 0 and now >= self._right_cooldown_end:
+                        print("[CAM] Ball RIGHT — actuating P2 right flipper")
+                        self._pulse_relay(p2_right_relay)
+                        self._right_cooldown_end = time.time() + CV_EXTRA_COOLDOWN
 
-                cv2.imshow("Ball Tracker", display)
-                cv2.waitKey(1)
+                    # FPS tracking
+                    frame_count += 1
+                    elapsed = time.time() - loop_start
+                    if elapsed >= 1.0:
+                        fps         = frame_count / elapsed
+                        frame_count = 0
+                        loop_start  = time.time()
 
-        finally:
-            picam2.stop()
-            cv2.destroyWindow("Ball Tracker")
-            print("[CAM] Camera released")
+            finally:
+                if picam2 is not None:
+                    try:
+                        picam2.stop()
+                    except Exception as e:
+                        print(f"[CAM] Error stopping camera: {e}")
+                    try:
+                        picam2.close()
+                    except Exception as e:
+                        print(f"[CAM] Error closing camera: {e}")
+                print("[CAM] Camera released")
+        except Exception as e:
+            print(f"[CAM] Camera initialization failed: {e}")
+            time.sleep(1.0)
 
 # ==============================================================================
 # INPUT CALLBACKS
