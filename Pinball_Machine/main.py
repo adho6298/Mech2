@@ -35,12 +35,12 @@ import os
 # ==============================================================================
 def has_display():
     """Check if a display server is available."""
-    # Check for DISPLAY variable (X11) or QT_QPA_PLATFORM settings
     has_x11 = os.environ.get('DISPLAY') is not None
-    # On headless systems, QT_QPA_PLATFORM will be unset or 'offscreen'
-    qt_platform = os.environ.get('QT_QPA_PLATFORM', '')
-    is_headless = qt_platform in ('', 'offscreen')
-    return has_x11 and is_headless == False
+    has_wayland = os.environ.get('WAYLAND_DISPLAY') is not None
+    # Only treat as headless if QT_QPA_PLATFORM is explicitly forced to 'offscreen'.
+    # An unset/empty QT_QPA_PLATFORM is normal on a display-connected system.
+    qt_forced_headless = os.environ.get('QT_QPA_PLATFORM', '') == 'offscreen'
+    return (has_x11 or has_wayland) and not qt_forced_headless
 
 DISPLAY_AVAILABLE = has_display()
 
@@ -96,6 +96,12 @@ FRAME_HEIGHT         = 240
 BRIGHTNESS_THRESHOLD = 190
 CV_HIT_TIME          = 0.05  # Seconds — relay pulse duration per CV flipper hit
 CV_EXTRA_COOLDOWN    = 0.4   # Seconds — additional cooldown after hit cycle
+
+# Auto-calibration settings
+CAL_START_THRESHOLD  = 100   # Threshold to begin calibration from
+CAL_GLARE_LIMIT      = 230   # If threshold climbs above this, report a glare error
+CAL_WINDOW           = 5.0   # Seconds of no-detection required to declare success
+CAL_BUFFER           = 3     # Safety margin added to the final threshold
 
 # ==============================================================================
 # HARDWARE IMPORTS — graceful fallback to simulation mode
@@ -433,6 +439,9 @@ class CameraThread:
             picam2 = Picamera2()
             cfg = picam2.create_video_configuration(
                 main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
+                # Full-sensor 2x2 binned mode — reads entire physical FOV and scales
+                # down to the requested output size via the ISP.
+                sensor={"output_size": (1640, 1232)},
                 buffer_count=2
             )
             picam2.configure(cfg)
@@ -874,6 +883,204 @@ def _start_sim_keyboard():
     return listener
 
 # ==============================================================================
+# SYSTEMS CHECK
+# ==============================================================================
+
+def systems_check():
+    """
+    Verify all subsystems before the game starts and report status on the LCDs.
+
+    Checks performed:
+      - LCD displays    : confirmed if both LCDs initialised successfully
+      - Camera          : confirmed if picamera2/OpenCV imported (informational)
+      - P1 drain switch : confirmed if the switch reads OPEN (ball not in drain)
+      - P2 drain switch : confirmed if the switch reads OPEN (ball not in drain)
+
+    Shows "ALL SYSTEMS GO!" if no FAIL results; "SYSTEM WARNING!" otherwise.
+    Camera N/A is informational only and does not set the warning flag.
+    Either way the machine continues — nothing in systems_check() halts startup.
+    """
+    write_to_lcds("SYSTEMS CHECK  ", "PLEASE WAIT... ")
+    print("[SYS] ---- Systems check ----")
+    time.sleep(1.0)
+
+    all_ok = True
+
+    # -- LCD displays --
+    lcd_ok = (not HARDWARE_AVAILABLE) or (len(lcds) > 0)
+    s = "OK  " if lcd_ok else "FAIL"
+    write_to_lcds("[CHECKING]     ", f"{'LCD':.<12}{s}")
+    print(f"[SYS] LCD displays   : {s.strip()}")
+    if not lcd_ok:
+        all_ok = False
+    time.sleep(0.8)
+
+    # -- Camera (informational — N/A does not trigger warning) --
+    s = "OK  " if CAMERA_AVAILABLE else "N/A "
+    write_to_lcds("[CHECKING]     ", f"{'CAMERA':.<12}{s}")
+    print(f"[SYS] Camera         : {s.strip()}")
+    time.sleep(0.8)
+
+    # -- P1 drain switch --
+    # Check that the Button object was successfully initialised by init_gpio().
+    # Reading is_pressed is not reliable here because the expected rest state
+    # depends on switch type (NO vs NC) and external wiring — both are valid.
+    if HARDWARE_AVAILABLE and p1_drain_btn is not None:
+        s = "OK  "
+    elif HARDWARE_AVAILABLE:
+        s = "FAIL"
+        all_ok = False
+        print("[SYS] WARNING: P1 drain switch GPIO init failed "
+              "\u2014 check wiring and GPIO pin assignment")
+    else:
+        s = "N/A "
+    write_to_lcds("[CHECKING]     ", f"{'P1 DRAIN':.<12}{s}")
+    print(f"[SYS] P1 drain sw.   : {s.strip()}")
+    time.sleep(0.8)
+
+    # -- P2 drain switch --
+    if HARDWARE_AVAILABLE and p2_drain_btn is not None:
+        s = "OK  "
+    elif HARDWARE_AVAILABLE:
+        s = "FAIL"
+        all_ok = False
+        print("[SYS] WARNING: P2 drain switch GPIO init failed "
+              "\u2014 check wiring and GPIO pin assignment")
+    else:
+        s = "N/A "
+    write_to_lcds("[CHECKING]     ", f"{'P2 DRAIN':.<12}{s}")
+    print(f"[SYS] P2 drain sw.   : {s.strip()}")
+    time.sleep(0.8)
+
+    # -- Final result --
+    if all_ok:
+        write_to_lcds("ALL SYSTEMS GO!", "CALIBRATING... ")
+        print("[SYS] All systems go!")
+    else:
+        write_to_lcds("SYSTEM WARNING!", "CHECK TERMINAL ")
+        print("[SYS] Systems check completed with warnings "
+              "\u2014 see terminal output above")
+    time.sleep(2.0)
+    print("[SYS] ----------------------------")
+
+
+# ==============================================================================
+# AUTO-CALIBRATION
+# ==============================================================================
+
+def auto_calibrate():
+    """
+    Automatically determine the correct BRIGHTNESS_THRESHOLD for the current
+    lighting conditions before the game starts.
+
+    Algorithm:
+      1. Start at CAL_START_THRESHOLD (100).
+      2. Capture frames from the camera using the exact same YUV420 Y-plane
+         pipeline as CameraThread._run() and Pinball_Camera.run_detection().
+      3. If ANY bright pixels are detected, increment the threshold by 1,
+         update the global BRIGHTNESS_THRESHOLD, refresh the LCD, and reset
+         the 5-second quiet window.
+      4. If NO bright pixels are detected for the entire CAL_WINDOW (5 s),
+         add CAL_BUFFER (+5) as a safety margin and declare success.
+      5. If the threshold exceeds CAL_GLARE_LIMIT (230) before finding a
+         quiet window, display a permanent GLARE ERROR on the LCDs and block
+         forever — the user must fix the lighting and restart.
+
+    The calibrated BRIGHTNESS_THRESHOLD is written to the module global and
+    is picked up automatically by CameraThread, which reads it as a live
+    global reference on every frame.
+    """
+    global BRIGHTNESS_THRESHOLD
+
+    if not CAMERA_AVAILABLE:
+        write_to_lcds("CAL: NO CAMERA", "  SKIPPING...  ")
+        print("[CAL] Camera not available — skipping auto-calibration")
+        time.sleep(2)
+        return
+
+    threshold = CAL_START_THRESHOLD
+    BRIGHTNESS_THRESHOLD = threshold
+    write_to_lcds("CALIBRATING...", f"BRT:  {threshold:3d}     ")
+    print(f"[CAL] Auto-calibration started — threshold begins at {threshold}")
+
+    kernel = np.ones((3, 3), np.uint8)
+
+    picam2 = None
+    try:
+        picam2 = Picamera2()
+        cfg = picam2.create_video_configuration(
+            main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "YUV420"},
+            # Full-sensor 2x2 binned mode — reads entire physical FOV and scales
+            # down to the requested output size via the ISP.
+            sensor={"output_size": (1640, 1232)},
+            buffer_count=2
+        )
+        picam2.configure(cfg)
+        picam2.start()
+
+        window_start = time.time()
+
+        while True:
+            try:
+                # --- Identical buffer read to CameraThread._run() and run_detection() ---
+                buffer      = picam2.capture_buffer("main")
+                y_len       = FRAME_WIDTH * FRAME_HEIGHT
+                frame       = np.frombuffer(buffer, dtype=np.uint8, count=y_len).reshape(
+                    (FRAME_HEIGHT, FRAME_WIDTH)
+                )
+                mask        = np.where(frame > threshold, 255, 0).astype(np.uint8)
+                mask        = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+                column_sums = np.sum(mask, axis=0)
+                total       = int(column_sums.sum())
+                # -----------------------------------------------------------------------
+
+                if total > 0:
+                    # Bright pixels detected — raise threshold and reset quiet window
+                    threshold += 1
+                    BRIGHTNESS_THRESHOLD = threshold
+                    write_to_lcds("CALIBRATING...", f"BRT:  {threshold:3d}     ")
+                    print(f"[CAL] Brightness detected — raising threshold to {threshold}")
+                    window_start = time.time()
+
+                    if threshold > CAL_GLARE_LIMIT:
+                        # Lighting is too bright to calibrate — halt permanently
+                        write_to_lcds(" GLARE ERROR!  ", "ADJUST LIGHTING")
+                        print(f"[CAL] GLARE ERROR — threshold {threshold} exceeded "
+                              f"CAL_GLARE_LIMIT={CAL_GLARE_LIMIT}")
+                        print("[CAL] Machine halted. Fix lighting and restart.")
+                        while True:
+                            time.sleep(1.0)
+
+                else:
+                    # No bright pixels — check if the quiet window has elapsed
+                    if time.time() - window_start >= CAL_WINDOW:
+                        threshold += CAL_BUFFER
+                        BRIGHTNESS_THRESHOLD = threshold
+                        write_to_lcds(" CAL COMPLETE! ", f"BRT:  {threshold:3d}     ")
+                        print(f"[CAL] Calibration complete — final threshold: {threshold}")
+                        time.sleep(2)
+                        break
+
+            except Exception as e:
+                print(f"[CAL] Frame capture error: {e}")
+                time.sleep(0.05)
+
+    except Exception as e:
+        print(f"[CAL] Camera init failed: {e} — skipping calibration")
+        write_to_lcds("CAL: CAM ERROR", "  SKIPPING...  ")
+        time.sleep(2)
+    finally:
+        if picam2 is not None:
+            try:
+                picam2.stop()
+            except Exception:
+                pass
+            try:
+                picam2.close()
+            except Exception:
+                pass
+
+# ==============================================================================
 # MAIN RUN LOOP — state machine
 # ==============================================================================
 
@@ -895,6 +1102,11 @@ def run():
         print("[ERROR] GPIO init failed — inputs/outputs may not work")
 
     camera_thread = CameraThread()
+
+    print("[SYS] Running systems check...")
+    systems_check()
+    print("[CAL] Starting auto-calibration...")
+    auto_calibrate()
 
     sim_listener = None
     if not HARDWARE_AVAILABLE:

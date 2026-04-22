@@ -70,12 +70,12 @@ from picamera2 import Picamera2, Preview
 # ==============================================================================
 def has_display():
     """Check if a display server is available."""
-    # Check for DISPLAY variable (X11) or QT_QPA_PLATFORM settings
     has_x11 = os.environ.get('DISPLAY') is not None
-    # On headless systems, QT_QPA_PLATFORM will be unset or 'offscreen'
-    qt_platform = os.environ.get('QT_QPA_PLATFORM', '')
-    is_headless = qt_platform in ('', 'offscreen')
-    return has_x11 and is_headless == False
+    has_wayland = os.environ.get('WAYLAND_DISPLAY') is not None
+    # Only treat as headless if QT_QPA_PLATFORM is explicitly forced to 'offscreen'.
+    # An unset/empty QT_QPA_PLATFORM is normal on a display-connected system.
+    qt_forced_headless = os.environ.get('QT_QPA_PLATFORM', '') == 'offscreen'
+    return (has_x11 or has_wayland) and not qt_forced_headless
 
 DISPLAY_AVAILABLE = has_display()
 
@@ -87,7 +87,7 @@ All values kept in sync with the constants in main.py.
 # Camera frame dimensions — must match FRAME_WIDTH / FRAME_HEIGHT in main.py
 # IMX219 (Camera Module v2.1) maximum width is 3280 px
 FRAME_WIDTH  = 640
-FRAME_HEIGHT = 240
+FRAME_HEIGHT = 244
 
 # Calibration mode uses a taller frame so you can see the full scene
 CAL_HEIGHT = FRAME_HEIGHT
